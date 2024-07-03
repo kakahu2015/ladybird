@@ -1,4 +1,4 @@
-name: Build macOS (a)
+name: Build macOS
 
 on:
   push:
@@ -12,11 +12,11 @@ jobs:
     runs-on: macos-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
-        brew install cmake ninja qt6
+        brew install cmake ninja qt6 autoconf automake autoconf-archive
 
     - name: Build with ladybird.sh
       run: |
@@ -29,7 +29,7 @@ jobs:
 
     - name: Compress Ladybird.app
       run: |
-        cd Build/ladybird/bin
+        cd build/ladybird/bin
         zip -r Ladybird.app.zip Ladybird.app
 
     - name: Create Release
@@ -49,6 +49,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./Build/ladybird/bin/Ladybird.app.zip
+        asset_path: ./build/ladybird/bin/Ladybird.app.zip
         asset_name: Ladybird.app.zip
         asset_content_type: application/zip
