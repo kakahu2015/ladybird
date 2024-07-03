@@ -16,7 +16,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install cmake ninja qt6 autoconf automake autoconf-archive
+        brew install cmake ninja qt6 autoconf automake autoconf-archive ffmpeg
 
     - name: Build with ladybird.sh
       run: |
