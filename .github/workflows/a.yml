@@ -1,11 +1,14 @@
-name: Build macOS
+name: Build macOS (a)
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
+jobs:
+  build-macos:
 jobs:
   build-macos:
     runs-on: macos-latest
