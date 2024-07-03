@@ -1,0 +1,53 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        brew install cmake ninja qt6
+
+    - name: Build with ladybird.sh
+      run: |
+        chmod +x Meta/ladybird.sh
+        ./Meta/ladybird.sh build
+
+    - name: Apply debug entitlements
+      run: |
+        ninja -C build/ladybird apply-debug-entitlements
+
+    - name: Compress Ladybird.app
+      run: |
+        cd Build/ladybird/bin
+        zip -r Ladybird.app.zip Ladybird.app
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.sha }}
+        release_name: Release ${{ github.sha }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./Build/ladybird/bin/Ladybird.app.zip
+        asset_name: Ladybird.app.zip
+        asset_content_type: application/zip
