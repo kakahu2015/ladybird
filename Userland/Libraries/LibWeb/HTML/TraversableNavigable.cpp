@@ -20,10 +20,6 @@
 #include <LibWeb/Painting/DisplayListPlayerCPU.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 
-#ifdef HAS_ACCELERATED_GRAPHICS
-#    include <LibWeb/Painting/DisplayListPlayerGPU.h>
-#endif
-
 namespace Web::HTML {
 
 JS_DEFINE_ALLOCATOR(TraversableNavigable);
@@ -33,8 +29,24 @@ TraversableNavigable::TraversableNavigable(JS::NonnullGCPtr<Page> page)
     , m_session_history_traversal_queue(vm().heap().allocate_without_realm<SessionHistoryTraversalQueue>())
 {
 #ifdef AK_OS_MACOS
-    m_metal_context = Core::get_metal_context();
-    m_skia_backend_context = Painting::DisplayListPlayerSkia::create_metal_context(*m_metal_context);
+    auto display_list_player_type = page->client().display_list_player_type();
+    if (display_list_player_type == DisplayListPlayerType::Skia) {
+        m_metal_context = Core::get_metal_context();
+        m_skia_backend_context = Painting::DisplayListPlayerSkia::create_metal_context(*m_metal_context);
+    }
+#endif
+
+#ifdef USE_VULKAN
+    auto display_list_player_type = page->client().display_list_player_type();
+    if (display_list_player_type == DisplayListPlayerType::Skia) {
+        auto maybe_vulkan_context = Core::create_vulkan_context();
+        if (!maybe_vulkan_context.is_error()) {
+            auto vulkan_context = maybe_vulkan_context.release_value();
+            m_skia_backend_context = Painting::DisplayListPlayerSkia::create_vulkan_context(vulkan_context);
+        } else {
+            dbgln("Vulkan context creation failed: {}", maybe_vulkan_context.error());
+        }
+    }
 #endif
 }
 
@@ -1192,19 +1204,7 @@ void TraversableNavigable::paint(DevicePixelRect const& content_rect, Painting::
     record_display_list(display_list_recorder, paint_config);
 
     auto display_list_player_type = page().client().display_list_player_type();
-    if (display_list_player_type == DisplayListPlayerType::GPU) {
-#ifdef HAS_ACCELERATED_GRAPHICS
-        Painting::DisplayListPlayerGPU player(*paint_options.accelerated_graphics_context, target.bitmap());
-        display_list.execute(player);
-#else
-        static bool has_warned_about_configuration = false;
-
-        if (!has_warned_about_configuration) {
-            warnln("\033[31;1mConfigured to use GPU painter, but current platform does not have accelerated graphics\033[0m");
-            has_warned_about_configuration = true;
-        }
-#endif
-    } else if (display_list_player_type == DisplayListPlayerType::Skia) {
+    if (display_list_player_type == DisplayListPlayerType::Skia) {
 #ifdef AK_OS_MACOS
         if (m_metal_context && m_skia_backend_context && is<Painting::IOSurfaceBackingStore>(target)) {
             auto& iosurface_backing_store = static_cast<Painting::IOSurfaceBackingStore&>(target);
@@ -1214,6 +1214,15 @@ void TraversableNavigable::paint(DevicePixelRect const& content_rect, Painting::
             return;
         }
 #endif
+
+#ifdef USE_VULKAN
+        if (m_skia_backend_context) {
+            Painting::DisplayListPlayerSkia player(*m_skia_backend_context, target.bitmap());
+            display_list.execute(player);
+            return;
+        }
+#endif
+
         Painting::DisplayListPlayerSkia player(target.bitmap());
         display_list.execute(player);
     } else {

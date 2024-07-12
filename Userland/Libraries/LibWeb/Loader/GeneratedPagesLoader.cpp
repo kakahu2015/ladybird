@@ -26,14 +26,15 @@ void set_chrome_process_executable_path(StringView executable_path)
     s_chrome_process_executable_path = MUST(String::from_utf8(executable_path));
 }
 
-ErrorOr<String> load_error_page(URL::URL const& url)
+ErrorOr<String> load_error_page(URL::URL const& url, StringView error_message)
 {
     // Generate HTML error page from error template file
     // FIXME: Use an actual templating engine (our own one when it's built, preferably with a way to check these usages at compile time)
     auto template_file = TRY(Core::Resource::load_from_uri("resource://ladybird/templates/error.html"sv));
     StringBuilder builder;
-    SourceGenerator generator { builder };
+    SourceGenerator generator { builder, '%', '%' };
     generator.set("failed_url", url.to_byte_string());
+    generator.set("error_message", escape_html_entities(error_message));
     generator.append(template_file->data());
     return TRY(String::from_utf8(generator.as_string_view()));
 }
@@ -71,7 +72,7 @@ ErrorOr<String> load_file_directory_page(URL::URL const& url)
     // FIXME: Use an actual templating engine (our own one when it's built, preferably with a way to check these usages at compile time)
     auto template_file = TRY(Core::Resource::load_from_uri("resource://ladybird/templates/directory.html"sv));
     StringBuilder builder;
-    SourceGenerator generator { builder };
+    SourceGenerator generator { builder, '%', '%' };
     generator.set("path", escape_html_entities(lexical_path.string()));
     generator.set("parent_url", TRY(String::formatted("file://{}", escape_html_entities(lexical_path.parent().string()))));
     generator.set("contents", contents.to_byte_string());
@@ -85,7 +86,7 @@ ErrorOr<String> load_about_version_page()
     // FIXME: Use an actual templating engine (our own one when it's built, preferably with a way to check these usages at compile time)
     auto template_file = TRY(Core::Resource::load_from_uri("resource://ladybird/templates/version.html"sv));
     StringBuilder builder;
-    SourceGenerator generator { builder };
+    SourceGenerator generator { builder, '%', '%' };
     generator.set("browser_name", BROWSER_NAME);
     generator.set("browser_version", BROWSER_VERSION);
     generator.set("arch_name", CPU_STRING);

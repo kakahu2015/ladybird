@@ -19,11 +19,13 @@
 #include <LibCore/System.h>
 #include <LibCore/Timer.h>
 #include <LibFileSystem/FileSystem.h>
+#include <LibWebView/Application.h>
 #include <jni.h>
 
 static ErrorOr<void> extract_tar_archive(String archive_file, ByteString output_directory);
 
 JavaVM* global_vm;
+static OwnPtr<WebView::Application> s_application;
 static OwnPtr<Core::EventLoop> s_main_event_loop;
 static jobject s_java_instance;
 static jmethodID s_schedule_event_loop_method;
@@ -41,7 +43,7 @@ Java_org_serenityos_ladybird_LadybirdActivity_initNativeCode(JNIEnv* env, jobjec
 
     dbgln("Set resource dir to {}", s_serenity_resource_root);
 
-    auto file_or_error = Core::System::open(MUST(String::formatted("{}/res/icons/16x16/app-browser.png", s_serenity_resource_root)), O_RDONLY);
+    auto file_or_error = Core::System::open(MUST(String::formatted("{}/res/icons/48x48/app-browser.png", s_serenity_resource_root)), O_RDONLY);
     if (file_or_error.is_error()) {
         dbgln("No resource files, extracting assets...");
         MUST(extract_tar_archive(MUST(String::formatted("{}/ladybird-assets.tar", s_serenity_resource_root)), s_serenity_resource_root));
@@ -69,6 +71,11 @@ Java_org_serenityos_ladybird_LadybirdActivity_initNativeCode(JNIEnv* env, jobjec
     };
     Core::EventLoopManager::install(*event_loop_manager);
     s_main_event_loop = make<Core::EventLoop>();
+
+    // FIXME: We are not making use of this Application object to track our processes.
+    // So, right now, the Application's ProcessManager is constantly empty.
+    // (However, LibWebView depends on an Application object existing, so we do have to actually create one.)
+    s_application = make<WebView::Application>(0, nullptr);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -84,6 +91,7 @@ Java_org_serenityos_ladybird_LadybirdActivity_disposeNativeCode(JNIEnv* env, job
 {
     s_main_event_loop = nullptr;
     s_schedule_event_loop_method = nullptr;
+    s_application = nullptr;
     env->DeleteGlobalRef(s_java_instance);
 
     delete &Core::EventLoopManager::the();

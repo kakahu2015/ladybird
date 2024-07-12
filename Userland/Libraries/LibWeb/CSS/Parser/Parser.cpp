@@ -69,6 +69,7 @@
 #include <LibWeb/CSS/StyleValues/RectStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RevertStyleValue.h>
+#include <LibWeb/CSS/StyleValues/ScrollbarGutterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ShorthandStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
@@ -2276,139 +2277,6 @@ RefPtr<StyleValue> Parser::parse_identifier_value(TokenStream<ComponentValue>& t
     return nullptr;
 }
 
-Optional<Color> Parser::parse_rgb_or_hsl_color(StringView function_name, Vector<ComponentValue> const& component_values)
-{
-    Token params[4];
-    bool legacy_syntax = false;
-    auto tokens = TokenStream { component_values };
-
-    tokens.skip_whitespace();
-    auto const& component1 = tokens.next_token();
-
-    if (!component1.is(Token::Type::Number)
-        && !component1.is(Token::Type::Percentage)
-        && !component1.is(Token::Type::Dimension))
-        return {};
-    params[0] = component1.token();
-
-    tokens.skip_whitespace();
-    if (tokens.peek_token().is(Token::Type::Comma)) {
-        legacy_syntax = true;
-        tokens.next_token();
-    }
-
-    tokens.skip_whitespace();
-    auto const& component2 = tokens.next_token();
-    if (!component2.is(Token::Type::Number) && !component2.is(Token::Type::Percentage))
-        return {};
-    params[1] = component2.token();
-
-    tokens.skip_whitespace();
-    if (legacy_syntax && !tokens.next_token().is(Token::Type::Comma))
-        return {};
-
-    tokens.skip_whitespace();
-    auto const& component3 = tokens.next_token();
-    if (!component3.is(Token::Type::Number) && !component3.is(Token::Type::Percentage))
-        return {};
-    params[2] = component3.token();
-
-    tokens.skip_whitespace();
-    auto const& alpha_separator = tokens.peek_token();
-    bool has_comma = alpha_separator.is(Token::Type::Comma);
-    bool has_slash = alpha_separator.is_delim('/');
-    if (legacy_syntax ? has_comma : has_slash) {
-        tokens.next_token();
-
-        tokens.skip_whitespace();
-        auto const& component4 = tokens.next_token();
-        if (!component4.is(Token::Type::Number) && !component4.is(Token::Type::Percentage))
-            return {};
-        params[3] = component4.token();
-    }
-
-    tokens.skip_whitespace();
-    if (tokens.has_next_token())
-        return {};
-
-    if (function_name.equals_ignoring_ascii_case("rgb"sv)
-        || function_name.equals_ignoring_ascii_case("rgba"sv)) {
-
-        // https://www.w3.org/TR/css-color-4/#rgb-functions
-
-        u8 a_val = 255;
-        if (params[3].is(Token::Type::Number))
-            a_val = clamp(lround(params[3].number_value() * 255.0), 0, 255);
-        else if (params[3].is(Token::Type::Percentage))
-            a_val = clamp(lround(params[3].percentage() * 2.55), 0, 255);
-
-        if (params[0].is(Token::Type::Number)
-            && params[1].is(Token::Type::Number)
-            && params[2].is(Token::Type::Number)) {
-
-            u8 r_val = clamp(llroundf(params[0].number_value()), 0, 255);
-            u8 g_val = clamp(llroundf(params[1].number_value()), 0, 255);
-            u8 b_val = clamp(llroundf(params[2].number_value()), 0, 255);
-
-            return Color(r_val, g_val, b_val, a_val);
-        }
-
-        if (params[0].is(Token::Type::Percentage)
-            && params[1].is(Token::Type::Percentage)
-            && params[2].is(Token::Type::Percentage)) {
-
-            u8 r_val = lround(clamp(params[0].percentage() * 2.55, 0, 255));
-            u8 g_val = lround(clamp(params[1].percentage() * 2.55, 0, 255));
-            u8 b_val = lround(clamp(params[2].percentage() * 2.55, 0, 255));
-
-            return Color(r_val, g_val, b_val, a_val);
-        }
-    } else if (function_name.equals_ignoring_ascii_case("hsl"sv)
-        || function_name.equals_ignoring_ascii_case("hsla"sv)) {
-
-        // https://www.w3.org/TR/css-color-4/#the-hsl-notation
-
-        auto a_val = 1.0;
-        if (params[3].is(Token::Type::Number))
-            a_val = params[3].number_value();
-        else if (params[3].is(Token::Type::Percentage))
-            a_val = params[3].percentage() / 100.0;
-
-        if (params[0].is(Token::Type::Dimension)
-            && params[1].is(Token::Type::Percentage)
-            && params[2].is(Token::Type::Percentage)) {
-
-            auto numeric_value = params[0].dimension_value();
-            auto unit_string = params[0].dimension_unit();
-            auto angle_type = Angle::unit_from_name(unit_string);
-
-            if (!angle_type.has_value())
-                return {};
-
-            auto angle = Angle { numeric_value, angle_type.release_value() };
-
-            float h_val = fmod(angle.to_degrees(), 360.0);
-            float s_val = params[1].percentage() / 100.0;
-            float l_val = params[2].percentage() / 100.0;
-
-            return Color::from_hsla(h_val, s_val, l_val, a_val);
-        }
-
-        if (params[0].is(Token::Type::Number)
-            && params[1].is(Token::Type::Percentage)
-            && params[2].is(Token::Type::Percentage)) {
-
-            float h_val = fmod(params[0].number_value(), 360.0);
-            float s_val = params[1].percentage() / 100.0;
-            float l_val = params[2].percentage() / 100.0;
-
-            return Color::from_hsla(h_val, s_val, l_val, a_val);
-        }
-    }
-
-    return {};
-}
-
 // https://www.w3.org/TR/CSS2/visufx.html#value-def-shape
 RefPtr<StyleValue> Parser::parse_rect_value(TokenStream<ComponentValue>& tokens)
 {
@@ -2487,6 +2355,433 @@ RefPtr<StyleValue> Parser::parse_rect_value(TokenStream<ComponentValue>& tokens)
     return RectStyleValue::create(EdgeRect { params[0], params[1], params[2], params[3] });
 }
 
+Optional<Color> Parser::parse_rgb_color(Vector<ComponentValue> const& component_values)
+{
+    u8 r_val = 0;
+    u8 g_val = 0;
+    u8 b_val = 0;
+
+    auto tokens = TokenStream { component_values };
+
+    tokens.skip_whitespace();
+    auto const& red = tokens.next_token();
+
+    if (!red.is(Token::Type::Number)
+        && !red.is(Token::Type::Percentage))
+        return {};
+
+    tokens.skip_whitespace();
+    bool legacy_syntax = tokens.peek_token().is(Token::Type::Comma);
+    if (legacy_syntax) {
+        // Legacy syntax.
+        tokens.next_token();
+        tokens.skip_whitespace();
+
+        auto const& green = tokens.next_token();
+        tokens.skip_whitespace();
+
+        tokens.next_token();
+        tokens.skip_whitespace();
+
+        auto const& blue = tokens.next_token();
+
+        if (red.is(Token::Type::Percentage)) {
+            // Percentage components.
+            if (!green.is(Token::Type::Percentage) || !blue.is(Token::Type::Percentage))
+                return {};
+
+            r_val = lround(clamp(red.token().percentage() * 2.55, 0, 255));
+            g_val = lround(clamp(green.token().percentage() * 2.55, 0, 255));
+            b_val = lround(clamp(blue.token().percentage() * 2.55, 0, 255));
+        } else {
+            // Number components.
+            if (!green.is(Token::Type::Number) || !blue.is(Token::Type::Number))
+                return {};
+
+            r_val = clamp(llroundf(red.token().number_value()), 0, 255);
+            g_val = clamp(llroundf(green.token().number_value()), 0, 255);
+            b_val = clamp(llroundf(blue.token().number_value()), 0, 255);
+        }
+    } else {
+        // Modern syntax.
+
+        if (red.is(Token::Type::Number)) {
+            r_val = clamp(llroundf(red.token().number_value()), 0, 255);
+        } else {
+            r_val = lround(clamp(red.token().percentage() * 2.55, 0, 255));
+        }
+
+        auto const& green = tokens.next_token();
+        if (green.is(Token::Type::Number)) {
+            g_val = clamp(llroundf(green.token().number_value()), 0, 255);
+        } else if (green.is(Token::Type::Percentage)) {
+            g_val = lround(clamp(green.token().percentage() * 2.55, 0, 255));
+        } else {
+            return {};
+        }
+
+        tokens.skip_whitespace();
+        auto const& blue = tokens.next_token();
+        if (blue.is(Token::Type::Number)) {
+            b_val = clamp(llroundf(blue.token().number_value()), 0, 255);
+        } else if (blue.is(Token::Type::Percentage)) {
+            b_val = lround(clamp(blue.token().percentage() * 2.55, 0, 255));
+        } else {
+            return {};
+        }
+    }
+
+    u8 alpha_val = 255;
+    tokens.skip_whitespace();
+    if (tokens.has_next_token()) {
+        auto const& separator = tokens.next_token();
+        bool is_comma = separator.is(Token::Type::Comma);
+        bool is_slash = separator.is_delim('/');
+        if (legacy_syntax ? !is_comma : !is_slash)
+            return {};
+
+        tokens.skip_whitespace();
+        auto const& alpha = tokens.next_token();
+
+        if (alpha.is(Token::Type::Number))
+            alpha_val = clamp(lround(alpha.token().number_value() * 255.0), 0, 255);
+        else if (alpha.is(Token::Type::Percentage))
+            alpha_val = clamp(lround(alpha.token().percentage() * 2.55), 0, 255);
+        else
+            return {};
+
+        tokens.skip_whitespace();
+        if (tokens.has_next_token())
+            return {}; // should have consumed all arguments.
+    }
+
+    return Color(r_val, g_val, b_val, alpha_val);
+}
+
+Optional<Color> Parser::parse_hsl_color(Vector<ComponentValue> const& component_values)
+{
+    float h_val = 0.0;
+    float s_val = 0.0;
+    float l_val = 0.0;
+
+    auto tokens = TokenStream { component_values };
+
+    tokens.skip_whitespace();
+    auto const& hue = tokens.next_token();
+
+    if (!hue.is(Token::Type::Number)
+        && !hue.is(Token::Type::Dimension))
+        return {};
+
+    if (hue.is(Token::Type::Number)) {
+        h_val = fmod(hue.token().number_value(), 360.0);
+    } else {
+        auto numeric_value = hue.token().dimension_value();
+        auto unit_string = hue.token().dimension_unit();
+        auto angle_type = Angle::unit_from_name(unit_string);
+
+        if (!angle_type.has_value())
+            return {};
+
+        auto angle = Angle { numeric_value, angle_type.release_value() };
+
+        h_val = fmod(angle.to_degrees(), 360.0);
+    }
+
+    tokens.skip_whitespace();
+    bool legacy_syntax = tokens.peek_token().is(Token::Type::Comma);
+    if (legacy_syntax) {
+        // legacy syntax.
+        tokens.next_token();
+        tokens.skip_whitespace();
+
+        auto const& saturation = tokens.next_token();
+        if (!saturation.is(Token::Type::Percentage))
+            return {};
+        s_val = max(saturation.token().percentage() / 100.0, 0);
+
+        tokens.skip_whitespace();
+        tokens.next_token();
+        tokens.skip_whitespace();
+
+        auto const& lightness = tokens.next_token();
+        if (!lightness.is(Token::Type::Percentage))
+            return {};
+        l_val = lightness.token().percentage() / 100.0;
+    } else {
+        // Modern syntax.
+
+        auto const& saturation = tokens.next_token();
+        if (saturation.is(Token::Type::Number)) {
+            s_val = saturation.token().number_value() / 100.0;
+        } else if (saturation.is(Token::Type::Percentage)) {
+            s_val = saturation.token().percentage() / 100.0;
+        } else {
+            return {};
+        }
+        s_val = max(s_val, 0);
+
+        tokens.skip_whitespace();
+        auto const& lightness = tokens.next_token();
+        if (lightness.is(Token::Type::Number)) {
+            l_val = lightness.token().number_value() / 100.0;
+        } else if (lightness.is(Token::Type::Percentage)) {
+            l_val = lightness.token().percentage() / 100.0;
+        } else {
+            return {};
+        }
+    }
+
+    float alpha_val = 1.0;
+    tokens.skip_whitespace();
+    if (tokens.has_next_token()) {
+        auto const& separator = tokens.next_token();
+        bool is_comma = separator.is(Token::Type::Comma);
+        bool is_slash = separator.is_delim('/');
+        if (legacy_syntax ? !is_comma : !is_slash)
+            return {};
+
+        tokens.skip_whitespace();
+        auto const& alpha = tokens.next_token();
+
+        if (alpha.is(Token::Type::Number))
+            alpha_val = alpha.token().number_value();
+        else if (alpha.is(Token::Type::Percentage))
+            alpha_val = alpha.token().percentage() / 100.0;
+        else
+            return {};
+
+        tokens.skip_whitespace();
+        if (tokens.has_next_token())
+            return {}; // should have consumed all arguments.
+    }
+
+    return Color::from_hsla(h_val, s_val, l_val, alpha_val);
+}
+
+Optional<Color> Parser::parse_hwb_color(Vector<ComponentValue> const& component_values)
+{
+    float h_val = 0.0;
+    float w_val = 0.0;
+    float b_val = 0.0;
+
+    auto tokens = TokenStream { component_values };
+
+    tokens.skip_whitespace();
+    auto const& hue = tokens.next_token();
+
+    if (!hue.is(Token::Type::Number)
+        && !hue.is(Token::Type::Dimension))
+        return {};
+
+    if (hue.is(Token::Type::Number)) {
+        h_val = fmod(hue.token().number_value(), 360.0);
+    } else {
+        auto numeric_value = hue.token().dimension_value();
+        auto unit_string = hue.token().dimension_unit();
+        auto angle_type = Angle::unit_from_name(unit_string);
+
+        if (!angle_type.has_value())
+            return {};
+
+        auto angle = Angle { numeric_value, angle_type.release_value() };
+
+        h_val = fmod(angle.to_degrees(), 360);
+    }
+
+    tokens.skip_whitespace();
+    auto const& whiteness = tokens.next_token();
+    if (whiteness.is(Token::Type::Number)) {
+        w_val = whiteness.token().number_value() / 100.0;
+    } else if (whiteness.is(Token::Type::Percentage)) {
+        w_val = whiteness.token().percentage() / 100.0;
+    } else {
+        return {};
+    }
+
+    tokens.skip_whitespace();
+    auto const& blackness = tokens.next_token();
+    if (blackness.is(Token::Type::Number)) {
+        b_val = blackness.token().number_value() / 100.0;
+    } else if (blackness.is(Token::Type::Percentage)) {
+        b_val = blackness.token().percentage() / 100.0;
+    } else {
+        return {};
+    }
+
+    float alpha_val = 1.0;
+    tokens.skip_whitespace();
+    if (tokens.has_next_token()) {
+        auto const& separator = tokens.next_token();
+        if (!separator.is_delim('/'))
+            return {};
+
+        tokens.skip_whitespace();
+        auto const& alpha = tokens.next_token();
+
+        if (alpha.is(Token::Type::Number))
+            alpha_val = alpha.token().number_value();
+        else if (alpha.is(Token::Type::Percentage))
+            alpha_val = alpha.token().percentage() / 100.0;
+        else
+            return {};
+
+        tokens.skip_whitespace();
+        if (tokens.has_next_token())
+            return {}; // should have consumed all arguments.
+    }
+
+    if (w_val + b_val >= 1.0) {
+        u8 gray = clamp(llroundf((w_val / (w_val + b_val)) * 255), 0, 255);
+        return Color(gray, gray, gray, clamp(llroundf(alpha_val * 255), 0, 255));
+    }
+
+    float value = 1 - b_val;
+    float saturation = 1 - (w_val / value);
+    return Color::from_hsv(h_val, saturation, value).with_opacity(alpha_val);
+}
+
+Optional<Color> Parser::parse_oklab_color(Vector<ComponentValue> const& component_values)
+{
+    float L_val = 0.0;
+    float a_val = 0.0;
+    float b_val = 0.0;
+
+    auto tokens = TokenStream { component_values };
+
+    tokens.skip_whitespace();
+    auto const& lightness = tokens.next_token();
+    if (lightness.is(Token::Type::Number)) {
+        L_val = lightness.token().number_value();
+    } else if (lightness.is(Token::Type::Percentage)) {
+        L_val = lightness.token().percentage() / 100.0;
+    } else {
+        return {};
+    }
+    L_val = clamp(L_val, 0.0, 1.0);
+
+    tokens.skip_whitespace();
+    auto const& a = tokens.next_token();
+    if (a.is(Token::Type::Number)) {
+        a_val = a.token().number_value();
+    } else if (a.is(Token::Type::Percentage)) {
+        a_val = a.token().percentage() / 100.0 * 0.4;
+    } else {
+        return {};
+    }
+
+    tokens.skip_whitespace();
+    auto const& b = tokens.next_token();
+    if (b.is(Token::Type::Number)) {
+        b_val = b.token().number_value();
+    } else if (a.is(Token::Type::Percentage)) {
+        b_val = b.token().percentage() / 100.0 * 0.4;
+    } else {
+        return {};
+    }
+
+    float alpha_val = 1.0;
+    tokens.skip_whitespace();
+    if (tokens.has_next_token()) {
+        auto const& separator = tokens.next_token();
+        if (!separator.is_delim('/'))
+            return {};
+
+        tokens.skip_whitespace();
+        auto const& alpha = tokens.next_token();
+
+        if (alpha.is(Token::Type::Number))
+            alpha_val = alpha.token().number_value();
+        else if (alpha.is(Token::Type::Percentage))
+            alpha_val = alpha.token().percentage() / 100.0;
+        else
+            return {};
+
+        tokens.skip_whitespace();
+        if (tokens.has_next_token())
+            return {}; // should have consumed all arguments.
+    }
+
+    return Color::from_oklab(L_val, a_val, b_val, alpha_val);
+}
+
+Optional<Color> Parser::parse_oklch_color(Vector<ComponentValue> const& component_values)
+{
+    float L_val = 0.0;
+    float c_val = 0.0;
+    float h_val = 0.0;
+
+    auto tokens = TokenStream { component_values };
+
+    tokens.skip_whitespace();
+    auto const& lightness = tokens.next_token();
+    if (lightness.is(Token::Type::Number)) {
+        L_val = lightness.token().number_value();
+    } else if (lightness.is(Token::Type::Percentage)) {
+        L_val = lightness.token().percentage() / 100.0;
+    } else {
+        return {};
+    }
+    L_val = clamp(L_val, 0.0, 1.0);
+
+    tokens.skip_whitespace();
+    auto const& chroma = tokens.next_token();
+    if (chroma.is(Token::Type::Number)) {
+        c_val = chroma.token().number_value();
+    } else if (chroma.is(Token::Type::Percentage)) {
+        c_val = chroma.token().percentage() / 100.0 * 0.4;
+    } else {
+        return {};
+    }
+    c_val = max(c_val, 0.0);
+
+    tokens.skip_whitespace();
+    auto const& hue = tokens.next_token();
+
+    if (!hue.is(Token::Type::Number)
+        && !hue.is(Token::Type::Dimension))
+        return {};
+
+    if (hue.is(Token::Type::Number)) {
+        h_val = hue.token().number_value() * AK::Pi<float> / 180;
+    } else {
+        auto numeric_value = hue.token().dimension_value();
+        auto unit_string = hue.token().dimension_unit();
+        auto angle_type = Angle::unit_from_name(unit_string);
+
+        if (!angle_type.has_value())
+            return {};
+
+        auto angle = Angle { numeric_value, angle_type.release_value() };
+
+        h_val = angle.to_radians();
+    }
+
+    float alpha_val = 1.0;
+    tokens.skip_whitespace();
+    if (tokens.has_next_token()) {
+        auto const& separator = tokens.next_token();
+        if (!separator.is_delim('/'))
+            return {};
+
+        tokens.skip_whitespace();
+        auto const& alpha = tokens.next_token();
+
+        if (alpha.is(Token::Type::Number))
+            alpha_val = alpha.token().number_value();
+        else if (alpha.is(Token::Type::Percentage))
+            alpha_val = alpha.token().percentage() / 100.0;
+        else
+            return {};
+
+        tokens.skip_whitespace();
+        if (tokens.has_next_token())
+            return {}; // should have consumed all arguments.
+    }
+
+    return Color::from_oklab(L_val, c_val * cos(h_val), c_val * sin(h_val), alpha_val);
+}
+
 Optional<Color> Parser::parse_color(ComponentValue const& component_value)
 {
     // https://www.w3.org/TR/css-color-4/
@@ -2506,8 +2801,20 @@ Optional<Color> Parser::parse_color(ComponentValue const& component_value)
     } else if (component_value.is_function()) {
         auto const& function = component_value.function();
         auto const& values = function.values();
+        auto const function_name = function.name();
 
-        return parse_rgb_or_hsl_color(function.name(), values);
+        if (function_name.equals_ignoring_ascii_case("rgb"sv) || function_name.equals_ignoring_ascii_case("rgba"sv))
+            return parse_rgb_color(values);
+        if (function_name.equals_ignoring_ascii_case("hsl"sv) || function_name.equals_ignoring_ascii_case("hsla"sv))
+            return parse_hsl_color(values);
+        if (function_name.equals_ignoring_ascii_case("hwb"sv))
+            return parse_hwb_color(values);
+        if (function_name.equals_ignoring_ascii_case("oklab"sv))
+            return parse_oklab_color(values);
+        if (function_name.equals_ignoring_ascii_case("oklch"sv))
+            return parse_oklch_color(values);
+
+        return {};
     }
 
     // https://quirks.spec.whatwg.org/#the-hashless-hex-color-quirk
@@ -5879,6 +6186,70 @@ RefPtr<GridAutoFlowStyleValue> Parser::parse_grid_auto_flow_value(TokenStream<Co
     return GridAutoFlowStyleValue::create(axis.value_or(GridAutoFlowStyleValue::Axis::Row), dense.value_or(GridAutoFlowStyleValue::Dense::No));
 }
 
+// https://drafts.csswg.org/css-overflow/#propdef-scrollbar-gutter
+RefPtr<StyleValue> Parser::parse_scrollbar_gutter_value(TokenStream<ComponentValue>& tokens)
+{
+    // auto | stable && both-edges?
+    if (!tokens.has_next_token())
+        return nullptr;
+
+    auto transaction = tokens.begin_transaction();
+
+    auto parse_stable = [&]() -> Optional<bool> {
+        auto transaction = tokens.begin_transaction();
+        auto token = tokens.next_token();
+        if (!token.is(Token::Type::Ident))
+            return {};
+        auto const& ident = token.token().ident();
+        if (ident.equals_ignoring_ascii_case("auto"sv)) {
+            transaction.commit();
+            return false;
+        } else if (ident.equals_ignoring_ascii_case("stable"sv)) {
+            transaction.commit();
+            return true;
+        }
+        return {};
+    };
+
+    auto parse_both_edges = [&]() -> Optional<bool> {
+        auto transaction = tokens.begin_transaction();
+        auto token = tokens.next_token();
+        if (!token.is(Token::Type::Ident))
+            return {};
+        auto const& ident = token.token().ident();
+        if (ident.equals_ignoring_ascii_case("both-edges"sv)) {
+            transaction.commit();
+            return true;
+        }
+        return {};
+    };
+
+    Optional<bool> stable;
+    Optional<bool> both_edges;
+    if (stable = parse_stable(); stable.has_value()) {
+        if (stable.value())
+            both_edges = parse_both_edges();
+    } else if (both_edges = parse_both_edges(); both_edges.has_value()) {
+        stable = parse_stable();
+        if (!stable.has_value() || !stable.value())
+            return nullptr;
+    }
+
+    if (tokens.has_next_token())
+        return nullptr;
+
+    transaction.commit();
+
+    ScrollbarGutter gutter_value;
+    if (both_edges.has_value())
+        gutter_value = ScrollbarGutter::BothEdges;
+    else if (stable.has_value() && stable.value())
+        gutter_value = ScrollbarGutter::Stable;
+    else
+        gutter_value = ScrollbarGutter::Auto;
+    return ScrollbarGutterStyleValue::create(gutter_value);
+}
+
 RefPtr<StyleValue> Parser::parse_grid_auto_track_sizes(TokenStream<ComponentValue>& tokens)
 {
     // https://www.w3.org/TR/css-grid-2/#auto-tracks
@@ -6471,6 +6842,10 @@ Parser::ParseErrorOr<NonnullRefPtr<StyleValue>> Parser::parse_css_value(Property
         return ParseError::SyntaxError;
     case PropertyID::Quotes:
         if (auto parsed_value = parse_quotes_value(tokens); parsed_value && !tokens.has_next_token())
+            return parsed_value.release_nonnull();
+        return ParseError::SyntaxError;
+    case PropertyID::ScrollbarGutter:
+        if (auto parsed_value = parse_scrollbar_gutter_value(tokens); parsed_value && !tokens.has_next_token())
             return parsed_value.release_nonnull();
         return ParseError::SyntaxError;
     case PropertyID::TextDecoration:

@@ -168,6 +168,8 @@ public:
     // https://html.spec.whatwg.org/multipage/forms.html#concept-submit-button
     virtual bool is_submit_button() const override;
 
+    bool is_single_line() const;
+
     virtual void reset_algorithm() override;
 
     virtual void form_associated_element_was_inserted() override;
@@ -319,6 +321,8 @@ private:
     String m_last_src_value;
 
     bool m_has_uncommitted_changes { false };
+
+    JS::GCPtr<DOM::Element> m_range_progress_element;
 };
 
 }

@@ -20,7 +20,6 @@
 #include <LibWeb/Loader/ProxyMappings.h>
 #include <LibWeb/Loader/Resource.h>
 #include <LibWeb/Loader/ResourceLoader.h>
-#include <LibWeb/Loader/UserAgent.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/Platform/Timer.h>
 
@@ -60,6 +59,7 @@ ResourceLoader::ResourceLoader(NonnullRefPtr<ResourceLoaderConnector> connector)
     : m_connector(move(connector))
     , m_user_agent(MUST(String::from_utf8(default_user_agent)))
     , m_platform(MUST(String::from_utf8(default_platform)))
+    , m_navigator_compatibility_mode(default_navigator_compatibility_mode)
 {
 }
 
@@ -134,12 +134,6 @@ static ByteString sanitized_url_for_logging(URL::URL const& url)
     return url.to_byte_string();
 }
 
-static void emit_signpost(ByteString const& message, int id)
-{
-    (void)message;
-    (void)id;
-}
-
 static void store_response_cookies(Page& page, URL::URL const& url, ByteString const& set_cookie_entry)
 {
     auto cookie = Cookie::parse_cookie(set_cookie_entry);
@@ -169,7 +163,6 @@ static void log_request_start(LoadRequest const& request)
 {
     auto url_for_logging = sanitized_url_for_logging(request.url());
 
-    emit_signpost(ByteString::formatted("Starting load: {}", url_for_logging), request.id());
     dbgln_if(SPAM_DEBUG, "ResourceLoader: Starting load of: \"{}\"", url_for_logging);
 }
 
@@ -178,7 +171,6 @@ static void log_success(LoadRequest const& request)
     auto url_for_logging = sanitized_url_for_logging(request.url());
     auto load_time_ms = request.load_time().to_milliseconds();
 
-    emit_signpost(ByteString::formatted("Finished load: {}", url_for_logging), request.id());
     dbgln_if(SPAM_DEBUG, "ResourceLoader: Finished load of: \"{}\", Duration: {}ms", url_for_logging, load_time_ms);
 }
 
@@ -188,8 +180,13 @@ static void log_failure(LoadRequest const& request, ErrorType const& error)
     auto url_for_logging = sanitized_url_for_logging(request.url());
     auto load_time_ms = request.load_time().to_milliseconds();
 
-    emit_signpost(ByteString::formatted("Failed load: {}", url_for_logging), request.id());
     dbgln("ResourceLoader: Failed load of: \"{}\", \033[31;1mError: {}\033[0m, Duration: {}ms", url_for_logging, error, load_time_ms);
+}
+
+static void log_filtered_request(LoadRequest const& request)
+{
+    auto url_for_logging = sanitized_url_for_logging(request.url());
+    dbgln("ResourceLoader: Filtered request to: \"{}\"", url_for_logging);
 }
 
 static bool should_block_request(LoadRequest const& request)
@@ -211,7 +208,7 @@ static bool should_block_request(LoadRequest const& request)
     }
 
     if (ContentFilter::the().is_filtered(url)) {
-        log_failure(request, "URL was filtered"sv);
+        log_filtered_request(request);
         return true;
     }
 
@@ -301,6 +298,8 @@ void ResourceLoader::load(LoadRequest& request, SuccessCallback success_callback
         auto resource = Core::Resource::load_from_uri(url.serialize());
         if (resource.is_error()) {
             log_failure(request, resource.error());
+            if (error_callback)
+                error_callback(ByteString::formatted("{}", resource.error()), {}, {}, {});
             return;
         }
 
@@ -335,10 +334,8 @@ void ResourceLoader::load(LoadRequest& request, SuccessCallback success_callback
 
             if (file_or_error.is_error()) {
                 log_failure(request, file_or_error.error());
-                if (error_callback) {
-                    auto status = file_or_error.error().code() == ENOENT ? 404u : 500u;
-                    error_callback(ByteString::formatted("{}", file_or_error.error()), status, {}, {});
-                }
+                if (error_callback)
+                    error_callback(ByteString::formatted("{}", file_or_error.error()), {}, {}, {});
                 return;
             }
 
@@ -355,7 +352,7 @@ void ResourceLoader::load(LoadRequest& request, SuccessCallback success_callback
             if (st_or_error.is_error()) {
                 log_failure(request, st_or_error.error());
                 if (error_callback)
-                    error_callback(ByteString::formatted("{}", st_or_error.error()), 500u, {}, {});
+                    error_callback(ByteString::formatted("{}", st_or_error.error()), {}, {}, {});
                 return;
             }
 
@@ -364,7 +361,7 @@ void ResourceLoader::load(LoadRequest& request, SuccessCallback success_callback
             if (maybe_file.is_error()) {
                 log_failure(request, maybe_file.error());
                 if (error_callback)
-                    error_callback(ByteString::formatted("{}", maybe_file.error()), 500u, {}, {});
+                    error_callback(ByteString::formatted("{}", maybe_file.error()), {}, {}, {});
                 return;
             }
 
@@ -373,7 +370,7 @@ void ResourceLoader::load(LoadRequest& request, SuccessCallback success_callback
             if (maybe_data.is_error()) {
                 log_failure(request, maybe_data.error());
                 if (error_callback)
-                    error_callback(ByteString::formatted("{}", maybe_data.error()), 500u, {}, {});
+                    error_callback(ByteString::formatted("{}", maybe_data.error()), {}, {}, {});
                 return;
             }
 

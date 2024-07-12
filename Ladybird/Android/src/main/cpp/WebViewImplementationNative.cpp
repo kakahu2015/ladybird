@@ -69,7 +69,7 @@ void WebViewImplementationNative::paint_into_bitmap(void* android_bitmap_raw, An
     // Software bitmaps only for now!
     VERIFY((info.flags & ANDROID_BITMAP_FLAGS_IS_HARDWARE) == 0);
 
-    auto android_bitmap = MUST(Gfx::Bitmap::create_wrapper(to_gfx_bitmap_format(info.format), { info.width, info.height }, 1, info.stride, android_bitmap_raw));
+    auto android_bitmap = MUST(Gfx::Bitmap::create_wrapper(to_gfx_bitmap_format(info.format), { info.width, info.height }, info.stride, android_bitmap_raw));
     Gfx::Painter painter(android_bitmap);
     if (auto* bitmap = m_client_state.has_usable_bitmap ? m_client_state.front_bitmap.bitmap.ptr() : m_backup_bitmap.ptr())
         painter.blit({ 0, 0 }, *bitmap, bitmap->rect());
@@ -93,8 +93,7 @@ void WebViewImplementationNative::paint_into_bitmap(void* android_bitmap_raw, An
 
 void WebViewImplementationNative::set_viewport_geometry(int w, int h)
 {
-    m_viewport_rect = { { 0, 0 }, { w, h } };
-    client().async_set_viewport_rect(0, m_viewport_rect);
+    m_viewport_size = { w, h };
     handle_resize();
 }
 
@@ -102,6 +101,25 @@ void WebViewImplementationNative::set_device_pixel_ratio(float f)
 {
     m_device_pixel_ratio = f;
     client().async_set_device_pixels_per_css_pixel(0, m_device_pixel_ratio);
+}
+
+void WebViewImplementationNative::mouse_event(Web::MouseEvent::Type event_type, float x, float y, float raw_x, float raw_y)
+{
+    Gfx::IntPoint position = { x, y };
+    Gfx::IntPoint screen_position = { raw_x, raw_y };
+    auto event = Web::MouseEvent {
+        event_type,
+        position.to_type<Web::DevicePixels>(),
+        screen_position.to_type<Web::DevicePixels>(),
+        Web::UIEvents::MouseButton::Primary,
+        Web::UIEvents::MouseButton::Primary,
+        Web::UIEvents::KeyModifier::Mod_None,
+        0,
+        0,
+        nullptr
+    };
+
+    enqueue_input_event(move(event));
 }
 
 NonnullRefPtr<WebView::WebContentClient> WebViewImplementationNative::bind_web_content_client()

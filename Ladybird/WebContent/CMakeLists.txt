@@ -1,4 +1,3 @@
-include(accelerated_graphics)
 include(fontconfig)
 
 set(WEBCONTENT_SOURCE_DIR ${LADYBIRD_SOURCE_DIR}/Userland/Services/WebContent/)
@@ -31,9 +30,10 @@ else()
     set_target_properties(webcontent PROPERTIES AUTOMOC OFF AUTORCC OFF AUTOUIC OFF)
 endif()
 
-target_include_directories(webcontent PUBLIC ${LADYBIRD_SOURCE_DIR}/Userland/Services/)
-target_include_directories(webcontent PUBLIC ${LADYBIRD_SOURCE_DIR}/Userland/)
-target_include_directories(webcontent PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/..)
+target_include_directories(webcontent PUBLIC $<BUILD_INTERFACE:${LADYBIRD_SOURCE_DIR}/Userland/Services/>)
+target_include_directories(webcontent PUBLIC $<BUILD_INTERFACE:${LADYBIRD_SOURCE_DIR}/Userland/>)
+target_include_directories(webcontent PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>)
+
 target_link_libraries(webcontent PUBLIC LibAudio LibCore LibFileSystem LibGfx LibIPC LibJS LibMain LibWeb LibWebSocket LibProtocol LibWebView LibImageDecoderClient)
 
 if (HAVE_PULSEAUDIO)
@@ -42,11 +42,6 @@ endif()
 
 if (HAS_FONTCONFIG)
     target_link_libraries(webcontent PRIVATE Fontconfig::Fontconfig)
-endif()
-
-if (HAS_ACCELERATED_GRAPHICS)
-    target_compile_definitions(webcontent PUBLIC HAS_ACCELERATED_GRAPHICS)
-    target_link_libraries(webcontent PUBLIC LibAccelGfx)
 endif()
 
 if (ENABLE_QT)

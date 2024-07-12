@@ -519,10 +519,10 @@ void BytecodeInterpreter::interpret(Configuration& configuration, InstructionPoi
         configuration.stack().push(Value(ValueType { ValueType::I64 }, instruction.arguments().get<i64>()));
         return;
     case Instructions::f32_const.value():
-        configuration.stack().push(Value(ValueType { ValueType::F32 }, static_cast<double>(instruction.arguments().get<float>())));
+        configuration.stack().push(Value(Value::AnyValueType(instruction.arguments().get<float>())));
         return;
     case Instructions::f64_const.value():
-        configuration.stack().push(Value(ValueType { ValueType::F64 }, instruction.arguments().get<double>()));
+        configuration.stack().push(Value(Value::AnyValueType(instruction.arguments().get<double>())));
         return;
     case Instructions::block.value(): {
         size_t arity = 0;
@@ -545,23 +545,13 @@ void BytecodeInterpreter::interpret(Configuration& configuration, InstructionPoi
         return;
     }
     case Instructions::loop.value(): {
-        size_t arity = 0;
-        size_t parameter_count = 0;
         auto& args = instruction.arguments().get<Instruction::StructuredInstructionArgs>();
-        switch (args.block_type.kind()) {
-        case BlockType::Empty:
-            break;
-        case BlockType::Type:
-            arity = 1;
-            break;
-        case BlockType::Index: {
+        size_t arity = 0;
+        if (args.block_type.kind() == BlockType::Index) {
             auto& type = configuration.frame().module().types()[args.block_type.type_index().value()];
             arity = type.parameters().size();
-            parameter_count = type.parameters().size();
         }
-        }
-
-        configuration.stack().entries().insert(configuration.stack().size() - parameter_count, Label(arity, ip.value() + 1));
+        configuration.stack().entries().insert(configuration.stack().size() - arity, Label(arity, ip.value() + 1));
         return;
     }
     case Instructions::if_.value(): {
@@ -1548,12 +1538,24 @@ void BytecodeInterpreter::interpret(Configuration& configuration, InstructionPoi
         return unary_operation<u128, u128, Operators::VectorFloatUnaryOp<2, Operators::Negate>>(configuration);
     case Instructions::f64x2_abs.value():
         return unary_operation<u128, u128, Operators::VectorFloatUnaryOp<2, Operators::Absolute>>(configuration);
-    case Instructions::v128_not.value():
     case Instructions::v128_and.value():
-    case Instructions::v128_andnot.value():
+        return binary_numeric_operation<u128, u128, Operators::BitAnd>(configuration);
     case Instructions::v128_or.value():
+        return binary_numeric_operation<u128, u128, Operators::BitOr>(configuration);
     case Instructions::v128_xor.value():
-    case Instructions::v128_bitselect.value():
+        return binary_numeric_operation<u128, u128, Operators::BitXor>(configuration);
+    case Instructions::v128_not.value():
+        return unary_operation<u128, u128, Operators::BitNot>(configuration);
+    case Instructions::v128_andnot.value():
+        return binary_numeric_operation<u128, u128, Operators::BitAndNot>(configuration);
+    case Instructions::v128_bitselect.value(): {
+        auto mask = *configuration.stack().pop().get<Value>().to<u128>();
+        auto false_vector = *configuration.stack().pop().get<Value>().to<u128>();
+        auto true_vector = *configuration.stack().pop().get<Value>().to<u128>();
+        u128 result = (true_vector & mask) | (false_vector & ~mask);
+        configuration.stack().push(Value(result));
+        return;
+    }
     case Instructions::v128_any_true.value():
     case Instructions::v128_load8_lane.value():
     case Instructions::v128_load16_lane.value():

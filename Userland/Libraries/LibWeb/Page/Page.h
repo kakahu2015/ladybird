@@ -42,10 +42,6 @@
 #include <LibWeb/PixelUnits.h>
 #include <LibWeb/UIEvents/KeyCode.h>
 
-#ifdef HAS_ACCELERATED_GRAPHICS
-#    include <LibAccelGfx/Context.h>
-#endif
-
 namespace Web {
 
 class PageClient;
@@ -278,15 +274,10 @@ struct PaintOptions {
     PaintOverlay paint_overlay { PaintOverlay::Yes };
     bool should_show_line_box_borders { false };
     bool has_focus { false };
-
-#ifdef HAS_ACCELERATED_GRAPHICS
-    AccelGfx::Context* accelerated_graphics_context { nullptr };
-#endif
 };
 
 enum class DisplayListPlayerType {
     CPU,
-    GPU,
     Skia
 };
 
@@ -328,7 +319,9 @@ public:
     virtual void page_did_request_image_context_menu(CSSPixelPoint, URL::URL const&, [[maybe_unused]] ByteString const& target, [[maybe_unused]] unsigned modifiers, Gfx::Bitmap const*) { }
     virtual void page_did_request_media_context_menu(CSSPixelPoint, [[maybe_unused]] ByteString const& target, [[maybe_unused]] unsigned modifiers, Page::MediaContextMenu) { }
     virtual void page_did_middle_click_link(URL::URL const&, [[maybe_unused]] ByteString const& target, [[maybe_unused]] unsigned modifiers) { }
-    virtual void page_did_enter_tooltip_area(CSSPixelPoint, ByteString const&) { }
+    virtual void page_did_request_tooltip_override(CSSPixelPoint, ByteString const&) { }
+    virtual void page_did_stop_tooltip_override() { }
+    virtual void page_did_enter_tooltip_area(ByteString const&) { }
     virtual void page_did_leave_tooltip_area() { }
     virtual void page_did_hover_link(URL::URL const&) { }
     virtual void page_did_unhover_link() { }

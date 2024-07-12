@@ -96,6 +96,20 @@ struct BitShiftRight {
     static StringView name() { return ">>"sv; }
 };
 
+struct BitAndNot {
+    template<typename Lhs, typename Rhs>
+    auto operator()(Lhs lhs, Rhs rhs) const { return lhs & ~rhs; }
+
+    static StringView name() { return "andnot"sv; }
+};
+
+struct BitNot {
+    template<typename Lhs>
+    auto operator()(Lhs lhs) const { return ~lhs; }
+
+    static StringView name() { return "~"sv; }
+};
+
 struct BitRotateLeft {
     template<typename Lhs, typename Rhs>
     auto operator()(Lhs lhs, Rhs rhs) const
@@ -329,14 +343,12 @@ struct Minimum {
     auto operator()(Lhs lhs, Rhs rhs) const
     {
         if constexpr (IsFloatingPoint<Lhs> || IsFloatingPoint<Rhs>) {
-            if (isnan(lhs))
-                return lhs;
-            if (isnan(rhs))
-                return rhs;
-            if (isinf(lhs))
-                return lhs > 0 ? rhs : lhs;
-            if (isinf(rhs))
-                return rhs > 0 ? lhs : rhs;
+            if (isnan(lhs) || isnan(rhs)) {
+                return isnan(lhs) ? lhs : rhs;
+            }
+            if (lhs == 0 && rhs == 0) {
+                return signbit(lhs) ? lhs : rhs;
+            }
         }
         return min(lhs, rhs);
     }
@@ -349,14 +361,12 @@ struct Maximum {
     auto operator()(Lhs lhs, Rhs rhs) const
     {
         if constexpr (IsFloatingPoint<Lhs> || IsFloatingPoint<Rhs>) {
-            if (isnan(lhs))
-                return lhs;
-            if (isnan(rhs))
-                return rhs;
-            if (isinf(lhs))
-                return lhs > 0 ? lhs : rhs;
-            if (isinf(rhs))
-                return rhs > 0 ? rhs : lhs;
+            if (isnan(lhs) || isnan(rhs)) {
+                return isnan(lhs) ? lhs : rhs;
+            }
+            if (lhs == 0 && rhs == 0) {
+                return signbit(lhs) ? rhs : lhs;
+            }
         }
         return max(lhs, rhs);
     }
@@ -652,8 +662,8 @@ struct Convert {
     template<typename Lhs>
     ResultT operator()(Lhs lhs) const
     {
-        auto signed_interpretation = bit_cast<MakeSigned<Lhs>>(lhs);
-        return static_cast<ResultT>(signed_interpretation);
+        auto interpretation = bit_cast<Lhs>(lhs);
+        return static_cast<ResultT>(interpretation);
     }
 
     static StringView name() { return "convert"sv; }
@@ -688,7 +698,7 @@ struct Demote {
             return nanf(""); // FIXME: Ensure canonical NaN remains canonical
 
         if (isinf(lhs))
-            return __builtin_huge_valf();
+            return copysignf(__builtin_huge_valf(), lhs);
 
         return static_cast<float>(lhs);
     }

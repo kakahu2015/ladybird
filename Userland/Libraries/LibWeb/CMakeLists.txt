@@ -1,5 +1,5 @@
 include(libweb_generators)
-include(accelerated_graphics)
+include(vulkan)
 
 set(SOURCES
     Animations/Animatable.cpp
@@ -267,13 +267,16 @@ set(SOURCES
     HTML/CustomElements/CustomElementName.cpp
     HTML/CustomElements/CustomElementReactionNames.cpp
     HTML/CustomElements/CustomElementRegistry.cpp
+    HTML/DataTransfer.cpp
     HTML/Dates.cpp
     HTML/DecodedImageData.cpp
+    HTML/DedicatedWorkerGlobalScope.cpp
     HTML/DocumentState.cpp
     HTML/DOMParser.cpp
     HTML/DOMStringMap.cpp
-    HTML/DataTransfer.cpp
+    HTML/DragEvent.cpp
     HTML/ElementInternals.cpp
+    HTML/EmbedderPolicy.cpp
     HTML/ErrorEvent.cpp
     HTML/EventHandler.cpp
     HTML/EventSource.cpp
@@ -431,6 +434,8 @@ set(SOURCES
     HTML/SyntaxHighlighter/SyntaxHighlighter.cpp
     HTML/TagNames.cpp
     HTML/TextMetrics.cpp
+    HTML/TextTrack.cpp
+    HTML/TextTrackList.cpp
     HTML/Timer.cpp
     HTML/TimeRanges.cpp
     HTML/ToggleEvent.cpp
@@ -753,18 +758,32 @@ set(GENERATED_SOURCES
     Worker/WebWorkerServerEndpoint.h
 )
 
-find_package(unofficial-skia CONFIG REQUIRED)
-
 serenity_lib(LibWeb web)
 
-target_link_libraries(LibWeb PRIVATE LibCore LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibAudio LibMedia LibWasm LibXML LibIDL LibURL LibTLS unofficial::skia::skia)
+find_package(unofficial-skia CONFIG)
+if(unofficial-skia_FOUND)
+    set(SKIA_LIBRARIES unofficial::skia::skia)
+else()
+    find_package(PkgConfig)
 
-if (HAS_ACCELERATED_GRAPHICS)
-    target_link_libraries(LibWeb PRIVATE ${ACCEL_GFX_LIBS})
-    target_sources(LibWeb PRIVATE Painting/DisplayListPlayerGPU.cpp)
-    target_link_libraries(LibWeb PRIVATE LibAccelGfx)
-    target_compile_definitions(LibWeb PRIVATE HAS_ACCELERATED_GRAPHICS)
+    # Get skia version from vcpkg.json
+    file(READ ${LADYBIRD_SOURCE_DIR}/vcpkg.json VCPKG_DOT_JSON)
+    string(JSON VCPKG_OVERRIDES_LENGTH LENGTH ${VCPKG_DOT_JSON} overrides)
+    MATH(EXPR VCPKG_OVERRIDES_END_RANGE "${VCPKG_OVERRIDES_LENGTH}-1")
+    foreach(IDX RANGE ${VCPKG_OVERRIDES_END_RANGE})
+      string(JSON VCPKG_OVERRIDE_NAME GET ${VCPKG_DOT_JSON} overrides ${IDX} name)
+      if(VCPKG_OVERRIDE_NAME STREQUAL "skia")
+        string(JSON SKIA_REQUIRED_VERSION GET ${VCPKG_DOT_JSON} overrides ${IDX} version)
+        string(REGEX MATCH "[0-9]+" SKIA_REQUIRED_VERSION ${SKIA_REQUIRED_VERSION})
+      endif()
+    endforeach()
+
+    pkg_check_modules(SKIA skia=${SKIA_REQUIRED_VERSION} REQUIRED)
+    target_include_directories(LibWeb PRIVATE ${SKIA_INCLUDE_DIRS})
+    target_link_directories(LibWeb PRIVATE ${SKIA_LIBRARY_DIRS})
 endif()
+
+target_link_libraries(LibWeb PRIVATE LibCore LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibAudio LibMedia LibWasm LibXML LibIDL LibURL LibTLS ${SKIA_LIBRARIES})
 
 generate_js_bindings(LibWeb)
 

@@ -66,6 +66,8 @@ public:
     void set_preferred_contrast(Web::CSS::PreferredContrast);
     void set_preferred_motion(Web::CSS::PreferredMotion);
 
+    void set_enable_do_not_track(bool);
+
     ByteString selected_text();
     Optional<String> selected_text_with_whitespace_collapsed();
     void select_all();
@@ -163,7 +165,9 @@ public:
     Function<void()> on_refresh;
     Function<void(Gfx::Bitmap const&)> on_favicon_change;
     Function<void(Gfx::StandardCursor)> on_cursor_change;
-    Function<void(Gfx::IntPoint, ByteString const&)> on_enter_tooltip_area;
+    Function<void(Gfx::IntPoint, ByteString const&)> on_request_tooltip_override;
+    Function<void()> on_stop_tooltip_override;
+    Function<void(ByteString const&)> on_enter_tooltip_area;
     Function<void()> on_leave_tooltip_area;
     Function<void(String const& message)> on_request_alert;
     Function<void(String const& message)> on_request_confirm;

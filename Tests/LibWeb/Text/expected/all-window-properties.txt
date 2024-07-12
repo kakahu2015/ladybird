@@ -76,6 +76,7 @@ Document
 DocumentFragment
 DocumentTimeline
 DocumentType
+DragEvent
 DynamicsCompressorNode
 Element
 ElementInternals
@@ -322,6 +323,8 @@ Text
 TextDecoder
 TextEncoder
 TextMetrics
+TextTrack
+TextTrackList
 TimeRanges
 ToggleEvent
 TrackEvent

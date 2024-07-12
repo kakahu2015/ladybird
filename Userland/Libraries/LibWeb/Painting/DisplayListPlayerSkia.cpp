@@ -26,6 +26,13 @@
 #include <LibWeb/Painting/DisplayListPlayerSkia.h>
 #include <LibWeb/Painting/ShadowPainting.h>
 
+#ifdef USE_VULKAN
+#    include <gpu/ganesh/vk/GrVkDirectContext.h>
+#    include <gpu/vk/GrVkBackendContext.h>
+#    include <gpu/vk/VulkanBackendContext.h>
+#    include <gpu/vk/VulkanExtensions.h>
+#endif
+
 #ifdef AK_OS_MACOS
 #    define FixedPoint FixedPointMacOS
 #    define Duration DurationMacOS
@@ -47,9 +54,85 @@ public:
     {
     }
 
+    void read_into_bitmap(Gfx::Bitmap& bitmap)
+    {
+        auto image_info = SkImageInfo::Make(bitmap.width(), bitmap.height(), kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+        SkPixmap pixmap(image_info, bitmap.begin(), bitmap.pitch());
+        m_surface->readPixels(pixmap, 0, 0);
+    }
+
 private:
     sk_sp<SkSurface> m_surface;
 };
+
+#ifdef USE_VULKAN
+class SkiaVulkanBackendContext final : public SkiaBackendContext {
+    AK_MAKE_NONCOPYABLE(SkiaVulkanBackendContext);
+    AK_MAKE_NONMOVABLE(SkiaVulkanBackendContext);
+
+public:
+    SkiaVulkanBackendContext(sk_sp<GrDirectContext> context, NonnullOwnPtr<skgpu::VulkanExtensions> extensions)
+        : m_context(move(context))
+        , m_extensions(move(extensions))
+    {
+    }
+
+    ~SkiaVulkanBackendContext() override {};
+
+    void flush_and_submit() override
+    {
+        m_context->flush();
+        m_context->submit(GrSyncCpu::kYes);
+    }
+
+    sk_sp<SkSurface> create_surface(int width, int height)
+    {
+        auto image_info = SkImageInfo::Make(width, height, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+        return SkSurfaces::RenderTarget(m_context.get(), skgpu::Budgeted::kYes, image_info);
+    }
+
+    skgpu::VulkanExtensions const* extensions() const { return m_extensions.ptr(); }
+
+private:
+    sk_sp<GrDirectContext> m_context;
+    NonnullOwnPtr<skgpu::VulkanExtensions> m_extensions;
+};
+
+OwnPtr<SkiaBackendContext> DisplayListPlayerSkia::create_vulkan_context(Core::VulkanContext& vulkan_context)
+{
+    GrVkBackendContext backend_context;
+
+    backend_context.fInstance = vulkan_context.instance;
+    backend_context.fDevice = vulkan_context.logical_device;
+    backend_context.fQueue = vulkan_context.graphics_queue;
+    backend_context.fPhysicalDevice = vulkan_context.physical_device;
+    backend_context.fMaxAPIVersion = vulkan_context.api_version;
+    backend_context.fGetProc = [](char const* proc_name, VkInstance instance, VkDevice device) {
+        if (device != VK_NULL_HANDLE) {
+            return vkGetDeviceProcAddr(device, proc_name);
+        }
+        return vkGetInstanceProcAddr(instance, proc_name);
+    };
+
+    auto extensions = make<skgpu::VulkanExtensions>();
+    backend_context.fVkExtensions = extensions.ptr();
+
+    sk_sp<GrDirectContext> ctx = GrDirectContexts::MakeVulkan(backend_context);
+    VERIFY(ctx);
+    return make<SkiaVulkanBackendContext>(ctx, move(extensions));
+}
+
+DisplayListPlayerSkia::DisplayListPlayerSkia(SkiaBackendContext& context, Gfx::Bitmap& bitmap)
+{
+    VERIFY(bitmap.format() == Gfx::BitmapFormat::BGRA8888);
+    auto surface = static_cast<SkiaVulkanBackendContext&>(context).create_surface(bitmap.width(), bitmap.height());
+    m_surface = make<SkiaSurface>(surface);
+    m_flush_context = [&bitmap, &surface = m_surface, &context] {
+        context.flush_and_submit();
+        surface->read_into_bitmap(bitmap);
+    };
+}
+#endif
 
 #ifdef AK_OS_MACOS
 class SkiaMetalBackendContext final : public SkiaBackendContext {
@@ -120,6 +203,11 @@ DisplayListPlayerSkia::~DisplayListPlayerSkia()
 {
     if (m_flush_context)
         m_flush_context();
+}
+
+static SkPoint to_skia_point(auto const& point)
+{
+    return SkPoint::Make(point.x(), point.y());
 }
 
 static SkRect to_skia_rect(auto const& rect)
@@ -442,6 +530,53 @@ CommandResult DisplayListPlayerSkia::pop_stacking_context(PopStackingContext con
     return CommandResult::Continue;
 }
 
+static ColorStopList replace_transition_hints_with_normal_color_stops(ColorStopList const& color_stop_list)
+{
+    ColorStopList stops_with_replaced_transition_hints;
+
+    auto const& first_color_stop = color_stop_list.first();
+    // First color stop in the list should never have transition hint value
+    VERIFY(!first_color_stop.transition_hint.has_value());
+    stops_with_replaced_transition_hints.empend(first_color_stop.color, first_color_stop.position);
+
+    // This loop replaces transition hints with five regular points, calculated using the
+    // formula defined in the spec. After rendering using linear interpolation, this will
+    // produce a result close enough to that obtained if the color of each point were calculated
+    // using the non-linear formula from the spec.
+    for (size_t i = 1; i < color_stop_list.size(); i++) {
+        auto const& color_stop = color_stop_list[i];
+        if (!color_stop.transition_hint.has_value()) {
+            stops_with_replaced_transition_hints.empend(color_stop.color, color_stop.position);
+            continue;
+        }
+
+        auto const& previous_color_stop = color_stop_list[i - 1];
+        auto const& next_color_stop = color_stop_list[i];
+
+        auto distance_between_stops = next_color_stop.position - previous_color_stop.position;
+        auto transition_hint = color_stop.transition_hint.value();
+
+        Array<float, 5> const transition_hint_relative_sampling_positions = {
+            transition_hint * 0.33f,
+            transition_hint * 0.66f,
+            transition_hint,
+            transition_hint + (1 - transition_hint) * 0.33f,
+            transition_hint + (1 - transition_hint) * 0.66f,
+        };
+
+        for (auto const& transition_hint_relative_sampling_position : transition_hint_relative_sampling_positions) {
+            auto position = previous_color_stop.position + transition_hint_relative_sampling_position * distance_between_stops;
+            auto value = color_stop_step(previous_color_stop, next_color_stop, position);
+            auto color = previous_color_stop.color.interpolate(next_color_stop.color, value);
+            stops_with_replaced_transition_hints.empend(color, position);
+        }
+
+        stops_with_replaced_transition_hints.empend(color_stop.color, color_stop.position);
+    }
+
+    return stops_with_replaced_transition_hints;
+}
+
 CommandResult DisplayListPlayerSkia::paint_linear_gradient(PaintLinearGradient const& command)
 {
     APPLY_PATH_CLIP_IF_NEEDED
@@ -449,15 +584,21 @@ CommandResult DisplayListPlayerSkia::paint_linear_gradient(PaintLinearGradient c
     auto const& linear_gradient_data = command.linear_gradient_data;
 
     // FIXME: Account for repeat length
+
+    auto const& color_stop_list = linear_gradient_data.color_stops.list;
+    VERIFY(!color_stop_list.is_empty());
+
+    auto stops_with_replaced_transition_hints = replace_transition_hints_with_normal_color_stops(color_stop_list);
+
     Vector<SkColor> colors;
-    colors.ensure_capacity(linear_gradient_data.color_stops.list.size());
     Vector<SkScalar> positions;
-    positions.ensure_capacity(linear_gradient_data.color_stops.list.size());
-    auto const& list = linear_gradient_data.color_stops.list;
-    for (auto const& color_stop : linear_gradient_data.color_stops.list) {
-        // FIXME: Account for ColorStop::transition_hint
-        colors.append(to_skia_color(color_stop.color));
-        positions.append(color_stop.position);
+
+    for (size_t stop_index = 0; stop_index < stops_with_replaced_transition_hints.size(); stop_index++) {
+        auto const& stop = stops_with_replaced_transition_hints[stop_index];
+        if (stop_index > 0 && stop == stops_with_replaced_transition_hints[stop_index - 1])
+            continue;
+        colors.append(to_skia_color(stop.color));
+        positions.append(stop.position);
     }
 
     auto const& rect = command.gradient_rect;
@@ -466,14 +607,14 @@ CommandResult DisplayListPlayerSkia::paint_linear_gradient(PaintLinearGradient c
     auto top = rect.center().translated(0, length / 2);
 
     Array<SkPoint, 2> points;
-    points[0] = SkPoint::Make(top.x(), top.y());
-    points[1] = SkPoint::Make(bottom.x(), bottom.y());
+    points[0] = to_skia_point(top);
+    points[1] = to_skia_point(bottom);
 
     auto center = to_skia_rect(rect).center();
     SkMatrix matrix;
     matrix.setRotate(linear_gradient_data.gradient_angle, center.x(), center.y());
 
-    auto shader = SkGradientShader::MakeLinear(points.data(), colors.data(), positions.data(), list.size(), SkTileMode::kClamp, 0, &matrix);
+    auto shader = SkGradientShader::MakeLinear(points.data(), colors.data(), positions.data(), positions.size(), SkTileMode::kClamp, 0, &matrix);
 
     SkPaint paint;
     paint.setShader(shader);
@@ -660,8 +801,8 @@ SkPaint paint_style_to_skia_paint(Painting::SVGGradientPaintStyle const& paint_s
         end_point.translate_by(bounding_rect.location());
 
         Array<SkPoint, 2> points;
-        points[0] = SkPoint::Make(start_point.x(), start_point.y());
-        points[1] = SkPoint::Make(end_point.x(), end_point.y());
+        points[0] = to_skia_point(start_point);
+        points[1] = to_skia_point(end_point);
 
         auto const& color_stops = linear_gradient_paint_style.color_stops();
 
@@ -765,8 +906,8 @@ CommandResult DisplayListPlayerSkia::draw_line(DrawLine const& command)
     if (!command.thickness)
         return CommandResult::Continue;
 
-    auto from = SkPoint::Make(command.from.x(), command.from.y());
-    auto to = SkPoint::Make(command.to.x(), command.to.y());
+    auto from = to_skia_point(command.from);
+    auto to = to_skia_point(command.to);
     auto& canvas = surface().canvas();
     SkPaint paint;
     paint.setStrokeWidth(command.thickness);
@@ -929,24 +1070,28 @@ CommandResult DisplayListPlayerSkia::paint_radial_gradient(PaintRadialGradient c
 {
     APPLY_PATH_CLIP_IF_NEEDED
 
-    auto const& linear_gradient_data = command.radial_gradient_data;
+    auto const& radial_gradient_data = command.radial_gradient_data;
 
-    // FIXME: Account for repeat length
+    auto const& color_stop_list = radial_gradient_data.color_stops.list;
+    VERIFY(!color_stop_list.is_empty());
+
+    auto stops_with_replaced_transition_hints = replace_transition_hints_with_normal_color_stops(color_stop_list);
+
     Vector<SkColor> colors;
-    colors.ensure_capacity(linear_gradient_data.color_stops.list.size());
     Vector<SkScalar> positions;
-    positions.ensure_capacity(linear_gradient_data.color_stops.list.size());
-    auto const& list = linear_gradient_data.color_stops.list;
-    for (auto const& color_stop : linear_gradient_data.color_stops.list) {
-        // FIXME: Account for ColorStop::transition_hint
-        colors.append(to_skia_color(color_stop.color));
-        positions.append(color_stop.position);
+
+    for (size_t stop_index = 0; stop_index < stops_with_replaced_transition_hints.size(); stop_index++) {
+        auto const& stop = stops_with_replaced_transition_hints[stop_index];
+        if (stop_index > 0 && stop == stops_with_replaced_transition_hints[stop_index - 1])
+            continue;
+        colors.append(to_skia_color(stop.color));
+        positions.append(stop.position);
     }
 
     auto const& rect = command.rect;
-    auto center = SkPoint::Make(command.center.x(), command.center.y());
+    auto center = to_skia_point(command.center.translated(command.rect.location()));
     auto radius = command.size.height();
-    auto shader = SkGradientShader::MakeRadial(center, radius, colors.data(), positions.data(), list.size(), SkTileMode::kClamp, 0);
+    auto shader = SkGradientShader::MakeRadial(center, radius, colors.data(), positions.data(), positions.size(), SkTileMode::kClamp, 0);
 
     SkPaint paint;
     paint.setShader(shader);
@@ -958,6 +1103,28 @@ CommandResult DisplayListPlayerSkia::paint_radial_gradient(PaintRadialGradient c
 CommandResult DisplayListPlayerSkia::paint_conic_gradient(PaintConicGradient const& command)
 {
     APPLY_PATH_CLIP_IF_NEEDED
+
+    auto const& conic_gradient_data = command.conic_gradient_data;
+
+    auto const& color_stop_list = conic_gradient_data.color_stops.list;
+    VERIFY(!color_stop_list.is_empty());
+
+    Vector<SkColor> colors;
+    Vector<SkScalar> positions;
+    for (auto const& stop : color_stop_list) {
+        colors.append(to_skia_color(stop.color));
+        positions.append(stop.position);
+    }
+
+    auto const& rect = command.rect;
+    auto center = command.position.translated(rect.location());
+    // FIXME: Account for repeat length and start angle
+    auto shader = SkGradientShader::MakeSweep(center.x(), center.y(), colors.data(), positions.data(), positions.size());
+
+    SkPaint paint;
+    paint.setShader(shader);
+    surface().canvas().drawRect(to_skia_rect(rect), paint);
+
     return CommandResult::Continue;
 }
 

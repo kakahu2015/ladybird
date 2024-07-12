@@ -79,6 +79,16 @@ WebContentView::WebContentView(QWidget* window, WebContentOptions const& web_con
         update_screen_rects();
     });
 
+    m_tooltip_hover_timer.setSingleShot(true);
+
+    QObject::connect(&m_tooltip_hover_timer, &QTimer::timeout, [this] {
+        if (m_tooltip_text.has_value())
+            QToolTip::showText(
+                QCursor::pos(),
+                qstring_from_ak_string(m_tooltip_text.value()),
+                this);
+    });
+
     initialize_client((parent_client == nullptr) ? CreateNewClient::Yes : CreateNewClient::No);
 
     on_ready_to_paint = [this]() {
@@ -89,7 +99,11 @@ WebContentView::WebContentView(QWidget* window, WebContentOptions const& web_con
         update_cursor(cursor);
     };
 
-    on_enter_tooltip_area = [this](auto position, auto const& tooltip) {
+    on_request_tooltip_override = [this](auto position, auto const& tooltip) {
+        m_tooltip_override = true;
+        if (m_tooltip_hover_timer.isActive())
+            m_tooltip_hover_timer.stop();
+
         auto tooltip_without_carriage_return = tooltip.contains("\r"sv)
             ? tooltip.replace("\r\n"sv, "\n"sv, ReplaceMode::All).replace("\r"sv, "\n"sv, ReplaceMode::All)
             : tooltip;
@@ -99,17 +113,30 @@ WebContentView::WebContentView(QWidget* window, WebContentOptions const& web_con
             this);
     };
 
-    on_leave_tooltip_area = []() {
-        QToolTip::hideText();
+    on_stop_tooltip_override = [this]() {
+        m_tooltip_override = false;
+    };
+
+    on_enter_tooltip_area = [this](auto const& tooltip) {
+        m_tooltip_text = tooltip.contains("\r"sv)
+            ? tooltip.replace("\r\n"sv, "\n"sv, ReplaceMode::All).replace("\r"sv, "\n"sv, ReplaceMode::All)
+            : tooltip;
+    };
+
+    on_leave_tooltip_area = [this]() {
+        m_tooltip_text.clear();
     };
 
     on_finish_handling_key_event = [this](auto const& event) {
         finish_handling_key_event(event);
     };
 
-    on_request_worker_agent = []() {
-        auto& request_server_client = static_cast<Ladybird::Application*>(QApplication::instance())->request_server_client;
-        auto worker_client = MUST(launch_web_worker_process(MUST(get_paths_for_helper_process("WebWorker"sv)), *request_server_client));
+    on_request_worker_agent = [&]() {
+        RefPtr<Protocol::RequestClient> request_server_client {};
+        if (m_web_content_options.use_lagom_networking == Ladybird::UseLagomNetworking::Yes)
+            request_server_client = static_cast<Ladybird::Application*>(QApplication::instance())->request_server_client;
+
+        auto worker_client = MUST(launch_web_worker_process(MUST(get_paths_for_helper_process("WebWorker"sv)), request_server_client));
         return worker_client->dup_socket();
     };
 }
@@ -326,6 +353,12 @@ void WebContentView::keyReleaseEvent(QKeyEvent* event)
 
 void WebContentView::mouseMoveEvent(QMouseEvent* event)
 {
+    if (!m_tooltip_override) {
+        if (QToolTip::isVisible())
+            QToolTip::hideText();
+        m_tooltip_hover_timer.start(600);
+    }
+
     enqueue_native_event(Web::MouseEvent::Type::MouseMove, *event);
 }
 

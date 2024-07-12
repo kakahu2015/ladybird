@@ -358,9 +358,9 @@ bool HTMLElement::cannot_navigate() const
     return !is<HTML::HTMLAnchorElement>(this) && !is_connected();
 }
 
-void HTMLElement::attribute_changed(FlyString const& name, Optional<String> const& value)
+void HTMLElement::attribute_changed(FlyString const& name, Optional<String> const& old_value, Optional<String> const& value)
 {
-    Element::attribute_changed(name, value);
+    Element::attribute_changed(name, old_value, value);
 
     if (name == HTML::AttributeNames::contenteditable) {
         if (!value.has_value()) {
@@ -643,6 +643,34 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<ElementInternals>> HTMLElement::attach_inte
 
     // 8. Return this's attached internals.
     return { internals };
+}
+
+// https://html.spec.whatwg.org/multipage/popover.html#dom-popover
+Optional<String> HTMLElement::popover() const
+{
+    // FIXME: This should probably be `Reflect` in the IDL.
+    // The popover IDL attribute must reflect the popover attribute, limited to only known values.
+    auto value = get_attribute(HTML::AttributeNames::popover);
+
+    if (!value.has_value())
+        return {};
+
+    if (value.value().is_empty() || value.value().equals_ignoring_ascii_case("auto"sv))
+        return "auto"_string;
+
+    return "manual"_string;
+}
+
+// https://html.spec.whatwg.org/multipage/popover.html#dom-popover
+WebIDL::ExceptionOr<void> HTMLElement::set_popover(Optional<String> value)
+{
+    // FIXME: This should probably be `Reflect` in the IDL.
+    // The popover IDL attribute must reflect the popover attribute, limited to only known values.
+    if (value.has_value())
+        return set_attribute(HTML::AttributeNames::popover, value.release_value());
+
+    remove_attribute(HTML::AttributeNames::popover);
+    return {};
 }
 
 void HTMLElement::did_receive_focus()

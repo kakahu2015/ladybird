@@ -200,7 +200,7 @@ def make_description(input_path: Path, name: str, out_path: Path) -> WastDescrip
     return parse(description)
 
 
-def gen_value(value: WasmValue) -> str:
+def gen_value(value: WasmValue, as_arg=False) -> str:
     def unsigned_to_signed(uint: int, bits: int) -> int:
         max_value = 2**bits
         if uint >= 2 ** (bits - 1):
@@ -221,7 +221,15 @@ def gen_value(value: WasmValue) -> str:
         f = struct.unpack("d", b)[0]
         return f
 
-    def float_to_str(f: float) -> str:
+    def float_to_str(bits: int, *, double=False, preserve_nan_sign=False) -> str:
+        f = int_to_float64_bitcast(bits) if double else int_to_float_bitcast(bits)
+
+        if math.isnan(f) and preserve_nan_sign:
+            f_bytes = bits.to_bytes(8 if double else 4, byteorder="little")
+            # -NaN does not preserve the sign bit in JavaScript land, so if
+            # we want to preserve NaN "sign", we pass in raw bytes
+            return f"new Uint8Array({list(f_bytes)})"
+
         if math.isnan(f) and math.copysign(1.0, f) < 0:
             return "-NaN"
         elif math.isnan(f):
@@ -234,8 +242,6 @@ def gen_value(value: WasmValue) -> str:
 
     if value.value.startswith("nan"):
         return "NaN"
-    elif value.value.startswith("-nan"):
-        return "-NaN"
     elif value.value == "inf":
         return "Infinity"
     elif value.value == "-inf":
@@ -247,9 +253,11 @@ def gen_value(value: WasmValue) -> str:
         case "i64":
             return str(unsigned_to_signed(int(value.value), 64)) + "n"
         case "f32":
-            return float_to_str(int_to_float_bitcast(int(value.value)))
+            return float_to_str(
+                int(value.value), double=False, preserve_nan_sign=as_arg
+            )
         case "f64":
-            return float_to_str(int_to_float64_bitcast(int(value.value)))
+            return float_to_str(int(value.value), double=True, preserve_nan_sign=as_arg)
         case "externref" | "funcref" | "v128":
             return value.value
         case _:
@@ -257,7 +265,7 @@ def gen_value(value: WasmValue) -> str:
 
 
 def gen_args(args: list[WasmValue]) -> str:
-    return ",".join(gen_value(arg) for arg in args)
+    return ",".join(gen_value(arg, True) for arg in args)
 
 
 def gen_module_command(command: ModuleCommand, ctx: Context):
@@ -308,12 +316,19 @@ def gen_invoke(
     *,
     fail_msg: str | None = None,
 ):
+    if not ctx.has_unclosed:
+        print(f'describe("inline (line {line}))", () => {{\nlet _test = test;\n')
     module = "module"
     if invoke.module is not None:
         module = f'namedModules["{invoke.module}"]'
+    utf8 = (
+        str(invoke.field.encode("utf8"))[2:-1]
+        .replace("\\'", "'")
+        .replace("`", "${'`'}")
+    )
     print(
-        f"""_test("execution of {ctx.current_module_name}: {escape(invoke.field)} (line {line})", () => {{
-let _field = {module}.getExport("{escape(invoke.field)}");
+        f"""_test(`execution of {ctx.current_module_name}: {utf8} (line {line})`, () => {{
+let _field = {module}.getExport(decodeURIComponent(escape(`{utf8}`)));
 expect(_field).not.toBeUndefined();"""
     )
     if fail_msg is not None:
@@ -323,6 +338,8 @@ expect(_field).not.toBeUndefined();"""
     if result is not None:
         print(f"expect(_result).toBe({gen_value(result)});")
     print("});")
+    if not ctx.has_unclosed:
+        print("});")
 
 
 def gen_get(line: int, get: Get, result: WasmValue | None, ctx: Context):

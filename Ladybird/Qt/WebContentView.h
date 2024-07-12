@@ -23,6 +23,7 @@
 #include <LibWeb/HTML/ActivateTab.h>
 #include <LibWebView/ViewImplementation.h>
 #include <QAbstractScrollArea>
+#include <QTimer>
 #include <QUrl>
 
 class QKeyEvent;
@@ -102,6 +103,10 @@ private:
     void enqueue_native_event(Web::KeyEvent::Type, QKeyEvent const& event);
     void finish_handling_key_event(Web::KeyEvent const&);
     void update_screen_rects();
+
+    bool m_tooltip_override { false };
+    Optional<ByteString> m_tooltip_text;
+    QTimer m_tooltip_hover_timer;
 
     bool m_should_show_line_box_borders { false };
 

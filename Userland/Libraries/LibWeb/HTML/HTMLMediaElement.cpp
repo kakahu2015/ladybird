@@ -30,6 +30,8 @@
 #include <LibWeb/HTML/PotentialCORSRequest.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
+#include <LibWeb/HTML/TextTrack.h>
+#include <LibWeb/HTML/TextTrackList.h>
 #include <LibWeb/HTML/TimeRanges.h>
 #include <LibWeb/HTML/TrackEvent.h>
 #include <LibWeb/HTML/VideoTrack.h>
@@ -56,6 +58,7 @@ void HTMLMediaElement::initialize(JS::Realm& realm)
 
     m_audio_tracks = realm.heap().allocate<AudioTrackList>(realm, realm);
     m_video_tracks = realm.heap().allocate<VideoTrackList>(realm, realm);
+    m_text_tracks = realm.heap().allocate<TextTrackList>(realm, realm);
     m_document_observer = realm.heap().allocate<DOM::DocumentObserver>(realm, realm, document());
 
     // https://html.spec.whatwg.org/multipage/media.html#playing-the-media-resource:media-element-82
@@ -88,15 +91,16 @@ void HTMLMediaElement::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_error);
     visitor.visit(m_audio_tracks);
     visitor.visit(m_video_tracks);
+    visitor.visit(m_text_tracks);
     visitor.visit(m_document_observer);
     visitor.visit(m_source_element_selector);
     visitor.visit(m_fetch_controller);
     visitor.visit(m_pending_play_promises);
 }
 
-void HTMLMediaElement::attribute_changed(FlyString const& name, Optional<String> const& value)
+void HTMLMediaElement::attribute_changed(FlyString const& name, Optional<String> const& old_value, Optional<String> const& value)
 {
-    Base::attribute_changed(name, value);
+    Base::attribute_changed(name, old_value, value);
 
     if (name == HTML::AttributeNames::src) {
         load_element().release_value_but_fixme_should_propagate_errors();

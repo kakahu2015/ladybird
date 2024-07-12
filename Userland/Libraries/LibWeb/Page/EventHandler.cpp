@@ -546,15 +546,22 @@ bool EventHandler::handle_mousemove(CSSPixelPoint viewport_position, CSSPixelPoi
         }
         if (m_in_mouse_selection) {
             auto hit = paint_root()->hit_test(position, Painting::HitTestType::TextCursor);
+            auto should_set_cursor_position = true;
             if (start_index.has_value() && hit.has_value() && hit->dom_node()) {
-                m_navigable->set_cursor_position(DOM::Position::create(realm, *hit->dom_node(), *start_index));
                 if (auto selection = document.get_selection()) {
                     auto anchor_node = selection->anchor_node();
-                    if (anchor_node)
-                        (void)selection->set_base_and_extent(*anchor_node, selection->anchor_offset(), *hit->paintable->dom_node(), hit->index_in_node);
-                    else
+                    if (anchor_node) {
+                        if (&anchor_node->root() == &hit->dom_node()->root())
+                            (void)selection->set_base_and_extent(*anchor_node, selection->anchor_offset(), *hit->paintable->dom_node(), hit->index_in_node);
+                        else
+                            should_set_cursor_position = false;
+                    } else {
                         (void)selection->set_base_and_extent(*hit->paintable->dom_node(), hit->index_in_node, *hit->paintable->dom_node(), hit->index_in_node);
+                    }
                 }
+                if (should_set_cursor_position)
+                    m_navigable->set_cursor_position(DOM::Position::create(realm, *hit->dom_node(), *start_index));
+
                 document.navigable()->set_needs_display();
             }
         }
@@ -567,7 +574,7 @@ bool EventHandler::handle_mousemove(CSSPixelPoint viewport_position, CSSPixelPoi
     if (hovered_node_changed) {
         JS::GCPtr<HTML::HTMLElement const> hovered_html_element = document.hovered_node() ? document.hovered_node()->enclosing_html_element_with_attribute(HTML::AttributeNames::title) : nullptr;
         if (hovered_html_element && hovered_html_element->title().has_value()) {
-            page.client().page_did_enter_tooltip_area(viewport_position, hovered_html_element->title()->to_byte_string());
+            page.client().page_did_enter_tooltip_area(hovered_html_element->title()->to_byte_string());
         } else {
             page.client().page_did_leave_tooltip_area();
         }
@@ -886,6 +893,45 @@ bool EventHandler::handle_keydown(UIEvents::KeyCode key, u32 modifiers, u32 code
             m_navigable->increment_cursor_position_offset();
             return true;
         }
+    }
+
+    // FIXME: Implement scroll by line and by page instead of approximating the behavior of other browsers.
+    auto arrow_key_scroll_distance = 100;
+    auto page_scroll_distance = document->window()->inner_height() - (document->window()->outer_height() - document->window()->inner_height());
+
+    switch (key) {
+    case UIEvents::KeyCode::Key_Up:
+    case UIEvents::KeyCode::Key_Down:
+        if (modifiers && modifiers != UIEvents::KeyModifier::Mod_Ctrl)
+            break;
+        if (modifiers)
+            key == UIEvents::KeyCode::Key_Up ? document->scroll_to_the_beginning_of_the_document() : document->window()->scroll_by(0, INT64_MAX);
+        else
+            document->window()->scroll_by(0, key == UIEvents::KeyCode::Key_Up ? -arrow_key_scroll_distance : arrow_key_scroll_distance);
+        return true;
+    case UIEvents::KeyCode::Key_Left:
+    case UIEvents::KeyCode::Key_Right:
+        if (modifiers > UIEvents::KeyModifier::Mod_Alt && modifiers != (UIEvents::KeyModifier::Mod_Alt | UIEvents::KeyModifier::Mod_AltGr))
+            break;
+        if (modifiers)
+            document->page().traverse_the_history_by_delta(key == UIEvents::KeyCode::Key_Left ? -1 : 1);
+        else
+            document->window()->scroll_by(key == UIEvents::KeyCode::Key_Left ? -arrow_key_scroll_distance : arrow_key_scroll_distance, 0);
+        return true;
+    case UIEvents::KeyCode::Key_PageUp:
+    case UIEvents::KeyCode::Key_PageDown:
+        if (modifiers > UIEvents::KeyModifier::Mod_None)
+            break;
+        document->window()->scroll_by(0, key == UIEvents::KeyCode::Key_PageUp ? -page_scroll_distance : page_scroll_distance);
+        return true;
+    case UIEvents::KeyCode::Key_Home:
+        document->scroll_to_the_beginning_of_the_document();
+        return true;
+    case UIEvents::KeyCode::Key_End:
+        document->window()->scroll_by(0, INT64_MAX);
+        return true;
+    default:
+        break;
     }
 
     // FIXME: Work out and implement the difference between this and keydown.

@@ -1689,6 +1689,10 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> http_network_or_cache_fet
         // NOTE: `Accept` and `Accept-Language` are already included (unless fetch() is used, which does not include
         //       the latter by default), and `Accept-Charset` is a waste of bytes. See HTTP header layer division for
         //       more details.
+        if (ResourceLoader::the().enable_do_not_track() && !http_request->header_list()->contains("DNT"sv.bytes())) {
+            auto header = Infrastructure::Header::from_string_pair("DNT"sv, "1"sv);
+            http_request->header_list()->append(move(header));
+        }
 
         // 21. If includeCredentials is true, then:
         if (include_credentials == IncludeCredentials::Yes) {
@@ -2222,7 +2226,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> nonstandard_resource_load
             auto response = Infrastructure::Response::create(vm);
             // FIXME: This is ugly, ResourceLoader should tell us.
             if (status_code.value_or(0) == 0) {
-                response = Infrastructure::Response::network_error(vm, "HTTP request failed"_string);
+                response = Infrastructure::Response::network_error(vm, TRY_OR_IGNORE(String::from_byte_string(error)));
             } else {
                 response->set_type(Infrastructure::Response::Type::Error);
                 response->set_status(status_code.value_or(400));

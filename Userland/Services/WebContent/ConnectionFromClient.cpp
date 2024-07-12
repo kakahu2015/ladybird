@@ -37,6 +37,7 @@
 #include <LibWeb/Loader/ContentFilter.h>
 #include <LibWeb/Loader/ProxyMappings.h>
 #include <LibWeb/Loader/ResourceLoader.h>
+#include <LibWeb/Loader/UserAgent.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/StackingContext.h>
 #include <LibWeb/Painting/ViewportPaintable.h>
@@ -396,6 +397,23 @@ void ConnectionFromClient::debug_request(u64 page_id, ByteString const& request,
                 load_url(page_id, url);
             }
         }
+        return;
+    }
+
+    if (request == "navigator-compatibility-mode") {
+        Web::NavigatorCompatibilityMode compatibility_mode;
+        if (argument == "chrome") {
+            compatibility_mode = Web::NavigatorCompatibilityMode::Chrome;
+        } else if (argument == "gecko") {
+            compatibility_mode = Web::NavigatorCompatibilityMode::Gecko;
+        } else if (argument == "webkit") {
+            compatibility_mode = Web::NavigatorCompatibilityMode::WebKit;
+        } else {
+            dbgln("Unknown navigator compatibility mode '{}', defaulting to Chrome", argument);
+            compatibility_mode = Web::NavigatorCompatibilityMode::Chrome;
+        }
+
+        Web::ResourceLoader::the().set_navigator_compatibility_mode(compatibility_mode);
         return;
     }
 }
@@ -926,6 +944,11 @@ void ConnectionFromClient::set_preferred_motion(u64 page_id, Web::CSS::Preferred
 {
     if (auto page = this->page(page_id); page.has_value())
         page->set_preferred_motion(motion);
+}
+
+void ConnectionFromClient::set_enable_do_not_track(u64, bool enable)
+{
+    Web::ResourceLoader::the().set_enable_do_not_track(enable);
 }
 
 void ConnectionFromClient::set_has_focus(u64 page_id, bool has_focus)

@@ -117,9 +117,6 @@ public slots:
     void open_next_tab();
     void open_previous_tab();
     void open_file();
-    void enable_auto_color_scheme();
-    void enable_light_color_scheme();
-    void enable_dark_color_scheme();
     void enable_auto_contrast();
     void enable_less_contrast();
     void enable_more_contrast();
@@ -173,9 +170,14 @@ private:
 
     ByteString user_agent_string() const { return m_user_agent_string; }
     void set_user_agent_string(ByteString const& user_agent_string) { m_user_agent_string = user_agent_string; }
+    ByteString navigator_compatibility_mode() const { return m_navigator_compatibility_mode; }
+    void set_navigator_compatibility_mode(ByteString const& navigator_compatibility_mode) { m_navigator_compatibility_mode = navigator_compatibility_mode; }
 
     QScreen* m_current_screen;
     double m_device_pixel_ratio { 0 };
+
+    Web::CSS::PreferredColorScheme m_preferred_color_scheme;
+    void set_preferred_color_scheme(Web::CSS::PreferredColorScheme color_scheme);
 
     QTabWidget* m_tabs_container { nullptr };
     Tab* m_current_tab { nullptr };
@@ -200,6 +202,7 @@ private:
     QAction* m_enable_same_origin_policy_action { nullptr };
 
     ByteString m_user_agent_string {};
+    ByteString m_navigator_compatibility_mode {};
 
     SettingsDialog* m_settings_dialog { nullptr };
 
